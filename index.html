@@ -1,0 +1,583 @@
+<!doctype html>
+<html lang="ro">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Jarvis">
+<meta name="theme-color" content="#05080d">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-192.png">
+<title>Jarvis</title>
+<style>
+:root{--bg:#05080d;--panel:#0b121b;--panel2:#101a26;--ring:#1b2a3a;--text:#e6f1ff;--muted:#7d93ab;--accent:#36d6ff;--accent2:#0a6cff;--good:#3ddc97;--bad:#ff6b6b;}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:16px/1.4 -apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;overscroll-behavior:none}
+a{color:var(--accent)}
+#app{position:fixed;top:0;left:0;right:0;height:100%;display:flex;flex-direction:column;background:radial-gradient(120% 60% at 50% 0%,#0b2236 0%,var(--bg) 60%)}
+header{padding:calc(env(safe-area-inset-top) + 10px) 18px 10px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--ring)}
+.brand{font-weight:700;letter-spacing:.25em;font-size:15px;display:flex;align-items:center;gap:10px;color:var(--accent)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 10px var(--accent)}
+.status{font-size:12px;color:var(--muted)}
+main{flex:1;min-height:0;position:relative}
+.view{display:none;height:100%}
+.view.active{display:flex;flex-direction:column}
+.scroll{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:14px 14px 24px}
+nav{display:flex;border-top:1px solid var(--ring);background:rgba(5,8,13,.92);padding-bottom:env(safe-area-inset-bottom)}
+nav button{flex:1;background:none;border:0;color:var(--muted);padding:9px 0 7px;font-size:11px;display:flex;flex-direction:column;align-items:center;gap:3px}
+nav button svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+nav button.on{color:var(--accent)}
+/* chat */
+.log{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:14px;display:flex;flex-direction:column;gap:8px}
+.msg{max-width:84%;padding:9px 13px;border-radius:16px;white-space:pre-wrap;word-wrap:break-word}
+.msg.user{align-self:flex-end;background:var(--accent2);border-bottom-right-radius:5px}
+.msg.bot{align-self:flex-start;background:var(--panel2);border:1px solid var(--ring);border-bottom-left-radius:5px}
+.msg.sys{align-self:center;font-size:13px;color:var(--muted);text-align:center;max-width:92%}
+.msg .chip{display:inline-block;margin-top:6px;padding:6px 12px;border-radius:999px;border:1px solid var(--accent);color:var(--accent);text-decoration:none;font-size:13px}
+.orb-wrap{display:flex;flex-direction:column;align-items:center;padding:6px 0 2px}
+.orb{position:relative;width:86px;height:86px;border-radius:50%;border:0;background:none;padding:0}
+.orb .core{position:absolute;inset:14px;border-radius:50%;background:radial-gradient(circle at 40% 35%,#bff4ff 0%,var(--accent) 35%,#0a4a7a 75%,#03121f 100%);box-shadow:0 0 24px rgba(54,214,255,.55),inset 0 0 12px rgba(255,255,255,.35);transition:transform .2s}
+.orb .ring{position:absolute;inset:4px;border-radius:50%;border:2px solid rgba(54,214,255,.35)}
+.orb .r2{inset:-4px;border-color:rgba(54,214,255,.15);border-style:dashed}
+.listening .orb .core{transform:scale(1.08);animation:pulse 1s ease-in-out infinite}
+.listening .orb .ring{animation:grow 1.2s ease-out infinite}
+.thinking .orb .r2,.thinking .orb .r1{animation:spin 1.6s linear infinite;border-top-color:var(--accent)}
+.speaking .orb .core{animation:talk .45s ease-in-out infinite alternate}
+@keyframes pulse{50%{box-shadow:0 0 44px rgba(54,214,255,.9),inset 0 0 12px rgba(255,255,255,.4)}}
+@keyframes grow{from{transform:scale(1);opacity:1}to{transform:scale(1.35);opacity:0}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes talk{from{transform:scale(.96)}to{transform:scale(1.07)}}
+.hint{font-size:12px;color:var(--muted);margin-top:4px;min-height:16px}
+.inrow{display:flex;gap:8px;padding:8px 12px 10px}
+.inrow input{flex:1}
+input,select{width:100%;font-size:16px;color:var(--text);background:var(--panel);border:1px solid var(--ring);border-radius:12px;padding:10px 12px;outline:none;-webkit-appearance:none;appearance:none}
+input:focus,select:focus{border-color:var(--accent)}
+input[type=checkbox]{width:auto;-webkit-appearance:checkbox;appearance:auto;accent-color:var(--accent);transform:scale(1.3)}
+input[type=range]{-webkit-appearance:auto;appearance:auto;padding:0;border:0;background:none;accent-color:var(--accent)}
+.send{width:44px;border:0;border-radius:12px;background:var(--accent);color:#012;font-size:18px;font-weight:700}
+/* cards */
+.card{background:var(--panel);border:1px solid var(--ring);border-radius:16px;padding:14px;margin-bottom:12px}
+.card h3{margin:0 0 10px;font-size:13px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.card label{display:block;font-size:13px;color:var(--muted);margin-bottom:10px}
+.card label input,.card label select{margin-top:5px}
+.card label.row{display:flex;justify-content:space-between;align-items:center;font-size:15px;color:var(--text)}
+.muted{color:var(--muted);font-size:13px}
+.btn{display:block;width:100%;text-align:center;border:0;border-radius:12px;padding:11px;font-size:15px;font-weight:600;background:var(--accent);color:#012;margin-top:6px}
+.btn.ghost{background:transparent;border:1px solid var(--ring);color:var(--text)}
+.btn.danger{background:transparent;border:1px solid var(--bad);color:var(--bad)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.grid .full{grid-column:1/-1}
+.monthbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.monthbar button{background:var(--panel);border:1px solid var(--ring);color:var(--text);border-radius:10px;width:40px;height:36px;font-size:20px}
+#mLabel{font-weight:600;text-transform:capitalize}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
+.stat{background:var(--panel);border:1px solid var(--ring);border-radius:14px;padding:10px}
+.stat span{display:block;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.stat b{font-size:15px}
+.good{color:var(--good)}.bad{color:var(--bad)}
+.catrow{margin-bottom:10px}
+.catrow .top{display:flex;justify-content:space-between;font-size:14px;margin-bottom:4px}
+.bar{height:7px;border-radius:4px;background:var(--panel2);overflow:hidden}
+.bar i{display:block;height:100%;background:var(--accent);border-radius:4px}
+.bar i.over{background:var(--bad)}
+.item{display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--ring)}
+.item:first-child{border-top:0}
+.item .grow{flex:1;min-width:0}
+.item .t{font-size:15px;overflow:hidden;text-overflow:ellipsis}
+.item .s{font-size:12px;color:var(--muted)}
+.item .x{background:none;border:0;color:var(--muted);font-size:20px;padding:0 4px}
+.item a.cal{font-size:12px;color:var(--accent);text-decoration:none;border:1px solid var(--ring);border-radius:8px;padding:4px 8px;white-space:nowrap}
+.item.done .t{text-decoration:line-through;color:var(--muted)}
+.inrow2{display:flex;gap:8px;margin-bottom:6px}
+.inrow2 .btn{width:48px;margin:0}
+#toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 80px);transform:translateX(-50%);background:var(--panel2);border:1px solid var(--accent);color:var(--text);padding:10px 16px;border-radius:12px;font-size:14px;max-width:88%;text-align:center;opacity:0;pointer-events:none;transition:opacity .25s;z-index:9}
+#toast.show{opacity:1}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="brand"><span class="dot"></span>J.A.R.V.I.S.</div>
+    <div class="status" id="status">Pregătit</div>
+  </header>
+  <main>
+    <section class="view active" id="v-chat">
+      <div class="log" id="log"></div>
+      <div class="orb-wrap">
+        <button class="orb" id="orb" aria-label="Vorbește"><span class="ring r2"></span><span class="ring r1"></span><span class="core"></span></button>
+        <div class="hint" id="hint">Atinge ca să vorbești</div>
+      </div>
+      <form class="inrow" id="inForm">
+        <input id="txt" placeholder="Scrie sau dictează…" autocomplete="off" enterkeyhint="send">
+        <button class="send" type="submit" aria-label="Trimite">➤</button>
+      </form>
+    </section>
+
+    <section class="view" id="v-fin"><div class="scroll">
+      <div class="monthbar"><button id="mPrev">‹</button><div id="mLabel"></div><button id="mNext">›</button></div>
+      <div class="stats">
+        <div class="stat"><span>Venituri</span><b id="sIn" class="good"></b></div>
+        <div class="stat"><span>Cheltuieli</span><b id="sOut" class="bad"></b></div>
+        <div class="stat"><span>Sold</span><b id="sBal"></b></div>
+      </div>
+      <div class="card"><h3>Cheltuieli pe categorii</h3><div id="cats"></div></div>
+      <div class="card"><h3>Adaugă tranzacție</h3>
+        <form id="txForm" class="grid">
+          <select id="fType"><option value="cheltuiala">Cheltuială</option><option value="venit">Venit</option></select>
+          <input id="fAmt" type="number" inputmode="decimal" step="0.01" min="0" placeholder="Sumă" required>
+          <input id="fCat" list="catList" placeholder="Categorie">
+          <input id="fDate" type="date">
+          <input id="fNote" class="full" placeholder="Descriere (opțional)">
+          <button class="btn full" type="submit">Adaugă</button>
+        </form>
+        <datalist id="catList"></datalist>
+      </div>
+      <div class="card"><h3>Tranzacții</h3><div id="txList"></div></div>
+      <div class="card"><h3>Import extras bancar</h3>
+        <p class="muted">Încarcă fișierul CSV exportat din aplicația băncii (BT, ING, BCR, Revolut…). Duplicatele sunt ignorate.</p>
+        <label class="btn ghost" style="color:var(--text)">Alege fișier CSV<input type="file" id="csvIn" accept=".csv,text/csv,text/plain" hidden></label>
+      </div>
+    </div></section>
+
+    <section class="view" id="v-notes"><div class="scroll">
+      <div class="card"><h3>Mementouri</h3><div id="remList"></div></div>
+      <div class="card"><h3>Notițe</h3>
+        <form id="noteForm" class="inrow2"><input id="noteTxt" placeholder="Notiță nouă…"><button class="btn" type="submit">+</button></form>
+        <div id="noteList"></div>
+      </div>
+      <div class="card"><h3>Ce știu despre tine</h3><div id="factList"></div></div>
+    </div></section>
+
+    <section class="view" id="v-set"><div class="scroll">
+      <div class="card"><h3>Creier (Google Gemini)</h3>
+        <label>Cheie API<input id="cKey" type="password" placeholder="AIza…" autocomplete="off"></label>
+        <p class="muted">Gratuită de la <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>. Rămâne doar pe telefonul tău.</p>
+        <label>Model<input id="cModel" placeholder="automat"></label>
+        <button class="btn" id="cTest">Salvează și testează</button>
+        <p class="muted" id="cTestOut"></p>
+      </div>
+      <div class="card"><h3>Voce</h3>
+        <label class="row">Răspunde cu voce<input type="checkbox" id="cSpeak"></label>
+        <label class="row">Conversație continuă<input type="checkbox" id="cCont"></label>
+        <label>Voce<select id="cVoice"></select></label>
+        <label>Viteză: <span id="cRateV"></span><input type="range" id="cRate" min="0.7" max="1.4" step="0.05"></label>
+        <button class="btn ghost" id="cVoiceTest">Ascultă vocea</button>
+      </div>
+      <div class="card"><h3>Despre tine</h3>
+        <label>Cum să-ți spun?<input id="cName" placeholder="Numele tău"></label>
+        <label>Monedă<input id="cCur" placeholder="RON"></label>
+      </div>
+      <div class="card"><h3>Date</h3>
+        <p class="muted">Totul e salvat doar pe acest telefon. Fă din când în când un backup.</p>
+        <button class="btn ghost" id="bExport">Exportă backup</button>
+        <label class="btn ghost" style="color:var(--text)">Importă backup<input type="file" id="bImport" accept=".json,application/json" hidden></label>
+        <button class="btn ghost" id="bClearChat">Șterge conversația</button>
+        <button class="btn danger" id="bWipe">Șterge toate datele</button>
+      </div>
+      <div class="card"><h3>Limite iPhone</h3>
+        <p class="muted">Apple nu permite niciunei aplicații să citească apelurile sau mesajele. Pentru ele folosește Siri („Hei Siri, citește-mi mesajele”).</p>
+      </div>
+    </div></section>
+  </main>
+  <nav>
+    <button data-v="chat" class="on"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8"/></svg>Asistent</button>
+    <button data-v="fin"><svg viewBox="0 0 24 24"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/></svg>Finanțe</button>
+    <button data-v="notes"><svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6z"/><path d="M9 11h7M9 15h7"/></svg>Notițe</button>
+    <button data-v="set"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></svg>Setări</button>
+  </nav>
+</div>
+<div id="toast"></div>
+
+<script>
+(function(){
+try{
+/* ---------- storage ---------- */
+const $=s=>document.querySelector(s);
+const store={
+  get(k,d){try{const v=localStorage.getItem('jv_'+k);return v==null?d:JSON.parse(v)}catch(e){return d}},
+  set(k,v){try{localStorage.setItem('jv_'+k,JSON.stringify(v))}catch(e){toast('Nu pot salva datele: '+e.message)}}
+};
+const S={
+  tx:store.get('tx',[]), notes:store.get('notes',[]), rem:store.get('rem',[]),
+  budgets:store.get('budgets',{}), facts:store.get('facts',[]), hist:store.get('hist',[]),
+  cfg:Object.assign({key:'',model:'',voice:'',rate:1,speak:true,continuous:false,name:'Bojin',currency:'RON'},store.get('cfg',{}))
+};
+const save=k=>store.set(k,S[k]);
+const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+const p2=n=>String(n).padStart(2,'0');
+const ymd=(y,m,d)=>{y=+y;m=+m;d=+d;if(!y||m<1||m>12||d<1||d>31)return null;return y+'-'+p2(m)+'-'+p2(d)};
+const dstr=d=>d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate());
+const today=()=>dstr(new Date());
+const validDate=s=>(typeof s==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(s))?s:null;
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const norm=s=>String(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').trim();
+const money=n=>(Math.round(n*100)/100).toLocaleString('ro-RO',{minimumFractionDigits:2,maximumFractionDigits:2})+' '+(S.cfg.currency||'RON');
+const CATS=['Mâncare','Restaurante','Transport','Locuință','Utilități','Abonamente','Sănătate','Cumpărături','Distracție','Educație','Cadouri','Salariu','Altele'];
+
+let toastT;
+function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('show');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),3500)}
+
+/* ---------- iOS keyboard fit ---------- */
+const app=$('#app');
+if(window.visualViewport){const fit=()=>{app.style.height=visualViewport.height+'px';window.scrollTo(0,0)};visualViewport.addEventListener('resize',fit);fit()}
+
+/* ---------- navigation ---------- */
+document.querySelectorAll('nav button').forEach(b=>b.addEventListener('click',()=>{
+  document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('on',x===b));
+  document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active',v.id==='v-'+b.dataset.v));
+  if(b.dataset.v==='fin')renderFin(); if(b.dataset.v==='notes')renderNotes();
+}));
+
+/* ---------- state / orb ---------- */
+const STATUS={idle:'Pregătit',listening:'Ascult…',thinking:'Mă gândesc…',speaking:'Vorbesc…'};
+const HINT={idle:'Atinge ca să vorbești',listening:'Atinge ca să oprești',thinking:'',speaking:'Atinge ca să mă întrerupi'};
+let state='idle';
+function setState(s){state=s;const c=$('#v-chat');c.classList.remove('listening','thinking','speaking');if(s!=='idle')c.classList.add(s);$('#status').textContent=STATUS[s];$('#hint').textContent=HINT[s]}
+
+/* ---------- chat log ---------- */
+function fmt(t){return esc(t).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/(^|\n)\s*[*-] /g,'$1• ')}
+function addMsg(role,text,extraHTML){
+  const d=document.createElement('div');d.className='msg '+role;d.innerHTML=fmt(text)+(extraHTML||'');
+  $('#log').appendChild(d);$('#log').scrollTop=$('#log').scrollHeight;return d;
+}
+
+/* ---------- voice out ---------- */
+let voices=[],ttsUnlocked=false;
+function loadVoices(){
+  if(!window.speechSynthesis)return;
+  voices=speechSynthesis.getVoices();
+  const sel=$('#cVoice'),ro=voices.filter(v=>/^ro/i.test(v.lang)),list=ro.length?ro:voices;
+  sel.innerHTML='<option value="">Automat (română)</option>'+list.map(v=>`<option value="${esc(v.voiceURI)}">${esc(v.name)} (${esc(v.lang)})</option>`).join('');
+  sel.value=S.cfg.voice||'';
+}
+if(window.speechSynthesis){loadVoices();speechSynthesis.onvoiceschanged=loadVoices}
+function pickVoice(){return voices.find(v=>v.voiceURI===S.cfg.voice)||voices.find(v=>/^ro/i.test(v.lang))||null}
+function unlockTTS(){if(ttsUnlocked||!window.speechSynthesis)return;ttsUnlocked=true;try{const u=new SpeechSynthesisUtterance(' ');u.volume=0;speechSynthesis.speak(u)}catch(e){}}
+function cleanSpeech(t){return t.replace(/[*#_`>~]/g,'').replace(/https?:\/\/\S+/g,'').replace(/\bRON\b/g,'lei').replace(/\s+/g,' ').trim()}
+function speak(text,force){
+  if((!S.cfg.speak&&!force)||!window.speechSynthesis||!text)return;
+  try{
+    speechSynthesis.cancel();
+    const u=new SpeechSynthesisUtterance(cleanSpeech(text));
+    u.lang='ro-RO';const v=pickVoice();if(v)u.voice=v;u.rate=+S.cfg.rate||1;
+    u.onstart=()=>setState('speaking');
+    u.onend=u.onerror=()=>{if(state==='speaking')setState('idle');if(S.cfg.continuous&&!force)setTimeout(()=>{try{if(state==='idle')listen()}catch(e){}},350)};
+    speechSynthesis.speak(u);
+  }catch(e){}
+}
+
+/* ---------- voice in ---------- */
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+let rec=null;
+function listen(){
+  unlockTTS();
+  if(state==='speaking'){speechSynthesis.cancel();setState('idle');return}
+  if(state==='thinking')return;
+  if(state==='listening'){try{rec.stop()}catch(e){}return}
+  if(!SR){toast('Recunoașterea vocală nu e disponibilă aici. Folosește microfonul de pe tastatură.');$('#txt').focus();return}
+  rec=new SR();rec.lang='ro-RO';rec.interimResults=true;rec.continuous=false;rec.maxAlternatives=1;
+  let fin='';
+  rec.onresult=e=>{let inter='';for(let i=e.resultIndex;i<e.results.length;i++){const r=e.results[i];if(r.isFinal)fin+=r[0].transcript;else inter+=r[0].transcript}$('#txt').value=(fin+inter).trim()};
+  rec.onerror=e=>{
+    if(e.error==='not-allowed'||e.error==='service-not-allowed')toast('Permite accesul la microfon și la Recunoașterea vocală (Setări iPhone → Safari / Siri).');
+    else if(e.error!=='no-speech'&&e.error!=='aborted')toast('Eroare microfon: '+e.error);
+  };
+  rec.onend=()=>{if(state==='listening')setState('idle');const t=$('#txt').value.trim();if(t){$('#txt').value='';ask(t)}};
+  try{rec.start();setState('listening')}catch(e){toast('Nu pot porni microfonul: '+e.message)}
+}
+$('#orb').addEventListener('click',listen);
+$('#inForm').addEventListener('submit',e=>{e.preventDefault();unlockTTS();const t=$('#txt').value.trim();if(!t||state==='thinking')return;$('#txt').value='';$('#txt').blur();ask(t)});
+
+/* ---------- tools (what Jarvis can do) ---------- */
+let pendingCal=[];
+function monthStart(){const d=new Date();return dstr(new Date(d.getFullYear(),d.getMonth(),1))}
+function budgetInfo(cat){
+  const b=S.budgets[cat];if(!b)return {};
+  const ms=monthStart(),spent=S.tx.filter(t=>t.type==='cheltuiala'&&t.category===cat&&t.date>=ms).reduce((a,t)=>a+t.amount,0);
+  return {buget_lunar:b,cheltuit_luna_asta:Math.round(spent*100)/100,ramas:Math.round((b-spent)*100)/100};
+}
+function findBy(list,key){const k=norm(key);return list.find(x=>x.id===key)||list.find(x=>norm(x.text).includes(k))}
+const TOOLS={
+  adauga_tranzactie(a){
+    const amount=Math.abs(+a.suma)||0;if(!amount)return {eroare:'Lipsește suma.'};
+    const t={id:uid(),type:a.tip==='venit'?'venit':'cheltuiala',amount,category:(a.categorie||'Altele').trim(),note:(a.descriere||'').trim(),date:validDate(a.data)||today()};
+    S.tx.push(t);save('tx');renderFin();
+    return Object.assign({ok:true,tranzactie:t},budgetInfo(t.category));
+  },
+  rezumat_financiar(a){
+    const from=validDate(a.de_la)||monthStart(),to=validDate(a.pana_la)||today();
+    let list=S.tx.filter(t=>t.date>=from&&t.date<=to);
+    if(a.categorie){const c=norm(a.categorie);list=list.filter(t=>norm(t.category)===c||norm(t.note).includes(c))}
+    const inc=list.filter(t=>t.type==='venit').reduce((s,t)=>s+t.amount,0),out=list.filter(t=>t.type==='cheltuiala').reduce((s,t)=>s+t.amount,0);
+    const byCat={};list.filter(t=>t.type==='cheltuiala').forEach(t=>byCat[t.category]=(byCat[t.category]||0)+t.amount);
+    const r2=n=>Math.round(n*100)/100;
+    return {perioada:from+' – '+to,moneda:S.cfg.currency,venituri:r2(inc),cheltuieli:r2(out),sold:r2(inc-out),numar_tranzactii:list.length,
+      pe_categorii:Object.entries(byCat).sort((x,y)=>y[1]-x[1]).map(([c,v])=>({categorie:c,suma:r2(v)})),
+      bugete:Object.keys(S.budgets).map(c=>Object.assign({categorie:c},budgetInfo(c))),
+      ultimele:list.slice().sort((x,y)=>y.date.localeCompare(x.date)).slice(0,15).map(t=>({data:t.date,tip:t.type,suma:t.amount,categorie:t.category,descriere:t.note}))};
+  },
+  sterge_ultima_tranzactie(){const t=S.tx.pop();save('tx');renderFin();return t?{ok:true,stearsa:t}:{eroare:'Nu există tranzacții.'}},
+  seteaza_buget(a){const c=(a.categorie||'').trim();if(!c)return {eroare:'Lipsește categoria.'};if(+a.suma_lunara>0)S.budgets[c]=+a.suma_lunara;else delete S.budgets[c];save('budgets');renderFin();return {ok:true,bugete:S.budgets}},
+  adauga_notita(a){if(!a.text)return {eroare:'Text gol.'};const n={id:uid(),text:a.text,date:today()};S.notes.unshift(n);save('notes');renderNotes();return {ok:true,notita:n}},
+  lista_notite(){return {notite:S.notes}},
+  sterge_notita(a){const n=findBy(S.notes,a.text_sau_id||'');if(!n)return {eroare:'Nu am găsit notița.'};S.notes=S.notes.filter(x=>x!==n);save('notes');renderNotes();return {ok:true,stearsa:n.text}},
+  adauga_memento(a){
+    const when=new Date(a.data_ora);if(!a.text||isNaN(when))return {eroare:'Am nevoie de text și de dată/oră valide (YYYY-MM-DDTHH:MM).'};
+    const r={id:uid(),text:a.text,when:a.data_ora,done:false};S.rem.push(r);S.rem.sort((x,y)=>new Date(x.when)-new Date(y.when));save('rem');renderNotes();pendingCal.push(r);
+    return {ok:true,memento:r,info:'Sub răspuns apare un buton ca utilizatorul să-l pună în Calendar, cu alertă.'};
+  },
+  lista_mementouri(){return {mementouri:S.rem.filter(r=>!r.done)}},
+  sterge_memento(a){const r=findBy(S.rem,a.text_sau_id||'');if(!r)return {eroare:'Nu am găsit mementoul.'};S.rem=S.rem.filter(x=>x!==r);save('rem');renderNotes();return {ok:true,sters:r.text}},
+  memoreaza_fapt(a){if(!a.fapt)return {eroare:'Gol.'};S.facts.push(a.fapt);save('facts');renderNotes();return {ok:true}},
+  uita_fapt(a){const k=norm(a.fapt),before=S.facts.length;S.facts=S.facts.filter(f=>!norm(f).includes(k));save('facts');renderNotes();return {ok:true,sterse:before-S.facts.length}}
+};
+const O=(props,req)=>({type:'OBJECT',properties:props,required:req||[]});
+const STR=d=>d?{type:'STRING',description:d}:{type:'STRING'};
+const NUM=d=>d?{type:'NUMBER',description:d}:{type:'NUMBER'};
+const DECLS=[
+  {name:'adauga_tranzactie',description:'Înregistrează o cheltuială sau un venit.',parameters:O({tip:{type:'STRING',enum:['cheltuiala','venit']},suma:NUM('suma, pozitivă'),categorie:STR(),descriere:STR(),data:STR('YYYY-MM-DD, implicit azi')},['tip','suma','categorie'])},
+  {name:'rezumat_financiar',description:'Venituri, cheltuieli, sold, cheltuieli pe categorii, bugete și ultimele tranzacții dintr-o perioadă (implicit luna curentă).',parameters:O({de_la:STR('YYYY-MM-DD'),pana_la:STR('YYYY-MM-DD'),categorie:STR('opțional: filtrează după categorie sau cuvânt din descriere')})},
+  {name:'sterge_ultima_tranzactie',description:'Șterge ultima tranzacție adăugată (pentru corecturi).'},
+  {name:'seteaza_buget',description:'Setează bugetul lunar al unei categorii (0 îl elimină).',parameters:O({categorie:STR(),suma_lunara:NUM()},['categorie','suma_lunara'])},
+  {name:'adauga_notita',description:'Salvează o notiță.',parameters:O({text:STR()},['text'])},
+  {name:'lista_notite',description:'Returnează toate notițele.'},
+  {name:'sterge_notita',description:'Șterge o notiță după id sau după un fragment din text.',parameters:O({text_sau_id:STR()},['text_sau_id'])},
+  {name:'adauga_memento',description:'Creează un memento la o dată și oră.',parameters:O({text:STR(),data_ora:STR('YYYY-MM-DDTHH:MM, ora locală')},['text','data_ora'])},
+  {name:'lista_mementouri',description:'Mementourile active.'},
+  {name:'sterge_memento',description:'Șterge un memento după id sau fragment din text.',parameters:O({text_sau_id:STR()},['text_sau_id'])},
+  {name:'memoreaza_fapt',description:'Memorează pe termen lung un fapt despre utilizator (preferințe, persoane, obiective).',parameters:O({fapt:STR()},['fapt'])},
+  {name:'uita_fapt',description:'Uită faptele care conțin textul dat.',parameters:O({fapt:STR()},['fapt'])}
+];
+
+function sysPrompt(){
+  const n=new Date(),name=S.cfg.name||'utilizatorul';
+  return `Ești J.A.R.V.I.S., asistentul personal al lui ${name}. Vorbești mereu în limba română, natural, cald, cu puțin umor fin, ca un majordom foarte inteligent.
+Răspunsurile tale sunt citite cu voce tare: fraze scurte, fără markdown, fără emoji, fără liste lungi. De obicei 1–3 propoziții.
+Acum este ${n.toLocaleDateString('ro-RO',{weekday:'long',day:'numeric',month:'long',year:'numeric'})}, ora ${p2(n.getHours())}:${p2(n.getMinutes())} (data ISO ${today()}). Moneda: ${S.cfg.currency||'RON'} (spune „lei”).
+Ai unelte pentru finanțe, notițe, mementouri și memorie. Folosește-le ori de câte ori e nevoie; nu inventa niciodată cifre financiare, ia-le din unelte.
+Când ${name} spune că a cheltuit sau a primit bani, înregistrează imediat, cu o categorie potrivită: ${CATS.join(', ')}. Dacă bugetul categoriei e aproape depășit, spune-i.
+Transformă datele relative („ieri”, „mâine la 9”, „vineri”) în date exacte. Când afli ceva important și durabil despre ${name}, memorează-l.
+Nu poți citi apelurile, mesajele sau alte aplicații ale telefonului (Apple nu permite); dacă ți se cere, explică pe scurt și sugerează Siri.
+${S.facts.length?'Ce știi despre '+name+':\n- '+S.facts.join('\n- '):''}`;
+}
+
+/* ---------- Gemini ---------- */
+const API='https://generativelanguage.googleapis.com/v1beta/';
+async function ensureModel(){
+  if(S.cfg.model)return S.cfg.model;
+  let pick='gemini-2.5-flash';
+  const r=await fetch(API+'models?pageSize=1000&key='+encodeURIComponent(S.cfg.key));
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok)throw new Error((j.error&&j.error.message)||('HTTP '+r.status));
+  const names=(j.models||[]).filter(m=>(m.supportedGenerationMethods||[]).includes('generateContent')).map(m=>m.name.replace(/^models\//,''));
+  if(names.includes('gemini-flash-latest'))pick='gemini-flash-latest';
+  else{const v=names.map(x=>{const m=x.match(/^gemini-(\d+(?:\.\d+)?)-flash$/);return m?[x,+m[1]]:null}).filter(Boolean).sort((a,b)=>b[1]-a[1]);if(v.length)pick=v[0][0]}
+  S.cfg.model=pick;save('cfg');$('#cModel').value=pick;return pick;
+}
+async function gemini(contents){
+  const model=await ensureModel();
+  const r=await fetch(API+'models/'+encodeURIComponent(model)+':generateContent?key='+encodeURIComponent(S.cfg.key),{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({systemInstruction:{parts:[{text:sysPrompt()}]},contents,tools:[{functionDeclarations:DECLS}],generationConfig:{temperature:0.7}})
+  });
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok){if(r.status===404){S.cfg.model='';save('cfg')}throw new Error((j.error&&j.error.message)||('HTTP '+r.status))}
+  return j;
+}
+async function ask(text){
+  addMsg('user',text);
+  if(!S.cfg.key){const m='Ca să pot gândi am nevoie de o cheie Gemini gratuită. Deschide Setări și lipește-o acolo.';addMsg('bot',m);speak(m);return}
+  S.hist.push({role:'user',parts:[{text}]});
+  const contents=S.hist.slice(-24);while(contents.length&&contents[0].role!=='user')contents.shift();
+  setState('thinking');pendingCal=[];
+  let reply='';
+  try{
+    for(let i=0;i<6;i++){
+      const j=await gemini(contents);
+      const c=j.candidates&&j.candidates[0]&&j.candidates[0].content;
+      if(!c||!c.parts){reply=(j.promptFeedback&&j.promptFeedback.blockReason)?'Îmi pare rău, nu pot răspunde la asta.':'N-am primit niciun răspuns. Mai încearcă.';break}
+      contents.push(c);
+      const calls=c.parts.filter(p=>p.functionCall);
+      if(!calls.length){reply=c.parts.filter(p=>p.text&&!p.thought).map(p=>p.text).join('').trim();break}
+      contents.push({role:'user',parts:calls.map(p=>{
+        const f=TOOLS[p.functionCall.name];let res;
+        try{res=f?f(p.functionCall.args||{}):{eroare:'Unealtă necunoscută.'}}catch(e){res={eroare:String(e.message||e)}}
+        return {functionResponse:{name:p.functionCall.name,response:res}};
+      })});
+    }
+    if(!reply)reply='Gata.';
+    S.hist.push({role:'model',parts:[{text:reply}]});
+    if(S.hist.length>60)S.hist=S.hist.slice(-60);
+    save('hist');
+    setState('idle');
+    addMsg('bot',reply,pendingCal.map(r=>{const h=icsHref(r);return h?`<br><a class="chip" href="${h}" download="memento.ics">📅 Pune „${esc(r.text)}” în Calendar</a>`:''}).join(''));
+    speak(reply);
+  }catch(e){
+    S.hist.pop();setState('idle');
+    let m=String(e.message||e);
+    if(/api key|API_KEY|permission/i.test(m))m='Cheia Gemini nu e validă. Verific-o în Setări.';
+    else if(/quota|rate|429|exhausted/i.test(m))m='Am atins limita gratuită pentru moment. Mai încearcă peste un minut.';
+    else if(/fetch|network|load failed/i.test(m))m='Nu am conexiune la internet.';
+    else m='A apărut o eroare: '+m;
+    addMsg('bot',m);speak(m);
+  }
+}
+
+/* ---------- calendar (.ics) ---------- */
+function icsHref(r){
+  const d=new Date(r.when);if(isNaN(d))return null;
+  const f=x=>x.getFullYear()+p2(x.getMonth()+1)+p2(x.getDate())+'T'+p2(x.getHours())+p2(x.getMinutes())+'00';
+  const e=new Date(d.getTime()+15*60000),stamp=new Date().toISOString().replace(/[-:]/g,'').replace(/\.\d+/,'');
+  const t=r.text.replace(/[\\,;]/g,m=>'\\'+m).replace(/\n/g,'\\n');
+  const ics=['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Jarvis//RO','BEGIN:VEVENT','UID:'+r.id+'@jarvis','DTSTAMP:'+stamp,'DTSTART:'+f(d),'DTEND:'+f(e),'SUMMARY:'+t,'BEGIN:VALARM','TRIGGER:PT0M','ACTION:DISPLAY','DESCRIPTION:'+t,'END:VALARM','END:VEVENT','END:VCALENDAR'].join('\r\n');
+  return 'data:text/calendar;charset=utf-8,'+encodeURIComponent(ics);
+}
+function checkReminders(){
+  const now=Date.now();let ch=false;
+  S.rem.forEach(r=>{if(!r.done&&!r.notified&&new Date(r.when).getTime()<=now){r.notified=true;ch=true;addMsg('sys','⏰ Memento: '+r.text);speak('Memento: '+r.text,true)}});
+  if(ch){save('rem');renderNotes()}
+}
+
+/* ---------- finance view ---------- */
+let viewMonth=new Date();viewMonth.setDate(1);
+function renderFin(){
+  const y=viewMonth.getFullYear(),m=viewMonth.getMonth(),from=dstr(new Date(y,m,1)),to=dstr(new Date(y,m+1,0));
+  $('#mLabel').textContent=viewMonth.toLocaleDateString('ro-RO',{month:'long',year:'numeric'});
+  const list=S.tx.filter(t=>t.date>=from&&t.date<=to).sort((a,b)=>b.date.localeCompare(a.date));
+  const inc=list.filter(t=>t.type==='venit').reduce((s,t)=>s+t.amount,0),out=list.filter(t=>t.type==='cheltuiala').reduce((s,t)=>s+t.amount,0);
+  $('#sIn').textContent=money(inc);$('#sOut').textContent=money(out);$('#sBal').textContent=money(inc-out);$('#sBal').className=inc-out<0?'bad':'good';
+  const by={};list.filter(t=>t.type==='cheltuiala').forEach(t=>by[t.category]=(by[t.category]||0)+t.amount);
+  Object.keys(S.budgets).forEach(c=>{if(!(c in by))by[c]=0});
+  const rows=Object.entries(by).sort((a,b)=>b[1]-a[1]),max=Math.max(1,...rows.map(([c,v])=>Math.max(v,S.budgets[c]||0)));
+  $('#cats').innerHTML=rows.length?rows.map(([c,v])=>{const b=S.budgets[c],over=b&&v>b,w=b?Math.min(100,v/b*100):v/max*100;
+    return `<div class="catrow"><div class="top"><span>${esc(c)}</span><span class="${over?'bad':''}">${money(v)}${b?' / '+money(b):''}</span></div><div class="bar"><i class="${over?'over':''}" style="width:${w.toFixed(1)}%"></i></div></div>`}).join(''):'<p class="muted">Nicio cheltuială luna aceasta. Spune-i lui Jarvis „am cheltuit 40 de lei pe mâncare”.</p>';
+  $('#txList').innerHTML=list.length?list.map(t=>`<div class="item"><div class="grow"><div class="t">${esc(t.note||t.category)}</div><div class="s">${esc(t.date.split('-').reverse().join('.'))} · ${esc(t.category)}</div></div><b class="${t.type==='venit'?'good':'bad'}">${t.type==='venit'?'+':'−'}${money(t.amount)}</b><button class="x" data-del-tx="${t.id}" aria-label="Șterge">×</button></div>`).join(''):'<p class="muted">Nicio tranzacție.</p>';
+  const cats=[...new Set(CATS.concat(S.tx.map(t=>t.category)))];
+  $('#catList').innerHTML=cats.map(c=>`<option value="${esc(c)}">`).join('');
+}
+$('#mPrev').onclick=()=>{viewMonth.setMonth(viewMonth.getMonth()-1);renderFin()};
+$('#mNext').onclick=()=>{viewMonth.setMonth(viewMonth.getMonth()+1);renderFin()};
+$('#txList').addEventListener('click',e=>{const id=e.target.dataset.delTx;if(id&&confirm('Ștergi tranzacția?')){S.tx=S.tx.filter(t=>t.id!==id);save('tx');renderFin()}});
+$('#fDate').value=today();
+$('#txForm').addEventListener('submit',e=>{e.preventDefault();
+  TOOLS.adauga_tranzactie({tip:$('#fType').value,suma:$('#fAmt').value,categorie:$('#fCat').value||'Altele',descriere:$('#fNote').value,data:$('#fDate').value});
+  $('#fAmt').value='';$('#fNote').value='';toast('Tranzacție adăugată');
+});
+
+/* ---------- CSV import ---------- */
+function parseCSV(text){
+  text=text.replace(/^﻿/,'');
+  const first=text.split(/\r?\n/).find(l=>l.trim())||'';
+  const delim=[';',',','\t'].map(d=>[d,first.split(d).length]).sort((a,b)=>b[1]-a[1])[0][0];
+  const rows=[];let row=[],cur='',q=false;
+  for(let i=0;i<text.length;i++){const ch=text[i];
+    if(q){if(ch==='"'){if(text[i+1]==='"'){cur+='"';i++}else q=false}else cur+=ch}
+    else if(ch==='"')q=true;
+    else if(ch===delim){row.push(cur);cur=''}
+    else if(ch==='\n'){row.push(cur);rows.push(row);row=[];cur=''}
+    else if(ch!=='\r')cur+=ch;
+  }
+  if(cur||row.length){row.push(cur);rows.push(row)}
+  return rows.filter(r=>r.some(c=>c.trim()));
+}
+function parseNum(s){
+  if(s==null)return null;s=String(s).replace(/[^\d,.\-]/g,'');if(!s)return null;
+  const lc=s.lastIndexOf(','),ld=s.lastIndexOf('.');
+  s=lc>ld?s.replace(/\./g,'').replace(',','.'):s.replace(/,/g,'');
+  const n=parseFloat(s);return isNaN(n)?null:n;
+}
+const MONTHS={ian:1,jan:1,feb:2,mar:3,apr:4,mai:5,may:5,iun:6,jun:6,iul:7,jul:7,aug:8,sep:9,oct:10,noi:11,nov:11,dec:12};
+function parseDate(s){
+  if(!s)return null;s=String(s).trim();let m;
+  if((m=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/)))return ymd(m[1],m[2],m[3]);
+  if((m=s.match(/^(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{2,4})/)))return ymd(m[3].length===2?'20'+m[3]:m[3],m[2],m[1]);
+  if((m=norm(s).match(/^(\d{1,2})\s+([a-z]{3})[a-z]*\.?\s+(\d{4})/))&&MONTHS[m[2]])return ymd(m[3],MONTHS[m[2]],m[1]);
+  return null;
+}
+const KW=[[/lidl|kaufland|carrefour|mega ?image|profi|penny|auchan|selgros|cora|la doi pasi/,'Mâncare'],[/glovo|tazz|bolt food|mcdonald|kfc|starbucks|restaurant|pizza|cafe|bistro/,'Restaurante'],[/omv|petrom|mol |rompetrol|lukoil|socar|uber|bolt|stb|metrorex|cfr|parcare|taxi/,'Transport'],[/enel|engie|e\.on|eon|electrica|apa nova|digi|rcs|orange|vodafone|telekom|hidroelectrica|ppc/,'Utilități'],[/netflix|spotify|youtube|apple\.com|icloud|google|hbo|disney|prime video|chatgpt|openai/,'Abonamente'],[/farmac|catena|dr\.? max|help net|sensiblu|regina maria|medlife|sanador/,'Sănătate'],[/emag|altex|dedeman|ikea|zara|h&m|decathlon|amazon|temu|shein|fashion days|pepco/,'Cumpărături'],[/cinema|steam|playstation|bilet|iabilet|eventim/,'Distracție'],[/chirie|rent|intretinere|imobil/,'Locuință']];
+function guessCat(t){const n=norm(t);for(const [re,c] of KW)if(re.test(n))return c;return 'Altele'}
+function importCSV(text){
+  const rows=parseCSV(text);let h=-1,c;
+  for(let i=0;i<Math.min(rows.length,30);i++){
+    const n=rows[i].map(norm),f=re=>n.findIndex(x=>re.test(x));
+    const di=f(/data|date/),ai=f(/^suma$|suma tranzactie|^amount|valoare|^sum$|^suma\b/),de=f(/debit/),cr=f(/credit/);
+    if(di>=0&&(ai>=0||de>=0||cr>=0)){h=i;c={di,ai,de,cr,ds:f(/descriere|detalii|description|beneficiar|explicat|merchant|partener|detail|ordonator/)};break}
+  }
+  if(h<0){toast('Nu recunosc formatul. Trimite-mi primele rânduri ale fișierului și îl adaptez.');return}
+  let added=0,dup=0;
+  rows.slice(h+1).forEach(r=>{
+    const date=parseDate(r[c.di]);if(!date)return;
+    let amt=null;
+    if(c.ai>=0&&r[c.ai]&&r[c.ai].trim())amt=parseNum(r[c.ai]);
+    else{const d=c.de>=0?parseNum(r[c.de]):null,k=c.cr>=0?parseNum(r[c.cr]):null;if(d)amt=-Math.abs(d);else if(k)amt=Math.abs(k)}
+    if(!amt)return;
+    const note=(c.ds>=0&&r[c.ds]?r[c.ds]:'').replace(/\s+/g,' ').trim().slice(0,120);
+    const t={id:uid(),date,amount:Math.abs(amt),type:amt<0?'cheltuiala':'venit',category:amt<0?guessCat(note):(/salar/i.test(note)?'Salariu':'Altele'),note,src:'csv'};
+    if(S.tx.some(x=>x.date===t.date&&x.amount===t.amount&&x.note===t.note)){dup++;return}
+    S.tx.push(t);added++;
+  });
+  save('tx');renderFin();toast(`Am importat ${added} tranzacții`+(dup?`, ${dup} duplicate ignorate`:'')+'.');
+}
+$('#csvIn').addEventListener('change',e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{try{importCSV(String(r.result))}catch(err){toast('Eroare la import: '+err.message)}};r.readAsText(f);e.target.value=''});
+
+/* ---------- notes view ---------- */
+function renderNotes(){
+  const fmtWhen=w=>{const d=new Date(w);return isNaN(d)?w:d.toLocaleString('ro-RO',{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})};
+  $('#remList').innerHTML=S.rem.length?S.rem.map(r=>{const h=icsHref(r);return `<div class="item${r.done?' done':''}"><input type="checkbox" data-done="${r.id}" ${r.done?'checked':''}><div class="grow"><div class="t">${esc(r.text)}</div><div class="s">${esc(fmtWhen(r.when))}</div></div>${h&&!r.done?`<a class="cal" href="${h}" download="memento.ics">📅 Calendar</a>`:''}<button class="x" data-del-rem="${r.id}">×</button></div>`}).join(''):'<p class="muted">Niciun memento. Spune „amintește-mi mâine la 9 să sun la bancă”.</p>';
+  $('#noteList').innerHTML=S.notes.length?S.notes.map(n=>`<div class="item"><div class="grow"><div class="t" style="white-space:pre-wrap">${esc(n.text)}</div><div class="s">${esc(n.date.split('-').reverse().join('.'))}</div></div><button class="x" data-del-note="${n.id}">×</button></div>`).join(''):'<p class="muted">Nicio notiță.</p>';
+  $('#factList').innerHTML=S.facts.length?S.facts.map((f,i)=>`<div class="item"><div class="grow"><div class="t">${esc(f)}</div></div><button class="x" data-del-fact="${i}">×</button></div>`).join(''):'<p class="muted">Încă nimic. Spune „ține minte că…”.</p>';
+}
+$('#v-notes').addEventListener('click',e=>{
+  const d=e.target.dataset;
+  if(d.delRem){S.rem=S.rem.filter(r=>r.id!==d.delRem);save('rem')}
+  else if(d.delNote){S.notes=S.notes.filter(n=>n.id!==d.delNote);save('notes')}
+  else if(d.delFact!=null){S.facts.splice(+d.delFact,1);save('facts')}
+  else if(d.done){const r=S.rem.find(x=>x.id===d.done);if(r){r.done=e.target.checked;save('rem')}}
+  else return;
+  renderNotes();
+});
+$('#noteForm').addEventListener('submit',e=>{e.preventDefault();const t=$('#noteTxt').value.trim();if(!t)return;TOOLS.adauga_notita({text:t});$('#noteTxt').value=''});
+
+/* ---------- settings ---------- */
+$('#cKey').value=S.cfg.key;$('#cModel').value=S.cfg.model;$('#cSpeak').checked=S.cfg.speak;$('#cCont').checked=S.cfg.continuous;
+$('#cRate').value=S.cfg.rate;$('#cRateV').textContent=(+S.cfg.rate).toFixed(2)+'×';$('#cName').value=S.cfg.name;$('#cCur').value=S.cfg.currency;
+const bind=(id,key,fn)=>$(id).addEventListener('change',e=>{S.cfg[key]=fn(e.target);save('cfg')});
+bind('#cKey','key',t=>t.value.trim());bind('#cModel','model',t=>t.value.trim());bind('#cSpeak','speak',t=>t.checked);bind('#cCont','continuous',t=>t.checked);
+bind('#cVoice','voice',t=>t.value);bind('#cName','name',t=>t.value.trim());bind('#cCur','currency',t=>t.value.trim().toUpperCase()||'RON');
+$('#cRate').addEventListener('input',e=>{S.cfg.rate=+e.target.value;$('#cRateV').textContent=S.cfg.rate.toFixed(2)+'×';save('cfg')});
+$('#cVoiceTest').onclick=()=>{unlockTTS();speak('Bună, '+(S.cfg.name||'')+'. Sunt Jarvis, la dispoziția ta.',true)};
+$('#cTest').onclick=async()=>{
+  unlockTTS();S.cfg.key=$('#cKey').value.trim();S.cfg.model=$('#cModel').value.trim();save('cfg');
+  const out=$('#cTestOut');if(!S.cfg.key){out.textContent='Lipește întâi cheia.';return}
+  out.textContent='Testez…';
+  try{const j=await gemini([{role:'user',parts:[{text:'Salută-mă scurt, într-o propoziție.'}]}]);
+    const t=((j.candidates||[])[0]||{}).content;const txt=t&&t.parts?t.parts.filter(p=>p.text&&!p.thought).map(p=>p.text).join(''):'';
+    out.textContent='✓ Funcționează ('+S.cfg.model+'): '+txt;speak(txt);
+  }catch(e){out.textContent='✗ '+e.message}
+};
+function download(name,data,type){
+  const blob=new Blob([data],{type});
+  try{const file=new File([blob],name,{type});if(navigator.canShare&&navigator.canShare({files:[file]})){navigator.share({files:[file]}).catch(()=>{});return}}catch(e){}
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},1000);
+}
+$('#bExport').onclick=()=>download('jarvis-backup-'+today()+'.json',JSON.stringify({v:1,tx:S.tx,notes:S.notes,rem:S.rem,budgets:S.budgets,facts:S.facts},null,1),'application/json');
+$('#bImport').addEventListener('change',e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{try{const d=JSON.parse(r.result);['tx','notes','rem','facts'].forEach(k=>{if(Array.isArray(d[k])){S[k]=d[k];save(k)}});if(d.budgets){S.budgets=d.budgets;save('budgets')}renderFin();renderNotes();toast('Backup restaurat.')}catch(err){toast('Fișier invalid.')}};r.readAsText(f);e.target.value=''});
+$('#bClearChat').onclick=()=>{if(confirm('Ștergi conversația?')){S.hist=[];save('hist');$('#log').innerHTML='';toast('Conversație ștearsă.')}};
+$('#bWipe').onclick=()=>{if(confirm('Ștergi TOATE datele (finanțe, notițe, mementouri)? Nu se poate anula.')){['tx','notes','rem','facts','hist'].forEach(k=>{S[k]=[];save(k)});S.budgets={};save('budgets');$('#log').innerHTML='';renderFin();renderNotes();toast('Date șterse.')}};
+
+/* ---------- start ---------- */
+S.hist.slice(-20).forEach(m=>{const t=(m.parts||[]).map(p=>p.text||'').join('');if(t)addMsg(m.role==='user'?'user':'bot',t)});
+const h=new Date().getHours(),greet=h<11?'Bună dimineața':h<18?'Bună ziua':'Bună seara';
+if(!S.cfg.key)addMsg('bot',greet+(S.cfg.name?', '+S.cfg.name:'')+'! Sunt Jarvis. Ca să pot gândi, am nevoie de o cheie Gemini gratuită: deschide Setări (jos în dreapta).');
+else if(!S.hist.length)addMsg('bot',greet+(S.cfg.name?', '+S.cfg.name:'')+'. Cu ce te pot ajuta?');
+renderFin();renderNotes();checkReminders();setInterval(checkReminders,20000);
+if(!SR)$('#hint').textContent='Folosește microfonul de pe tastatură';
+if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
+}catch(err){document.body.insertAdjacentHTML('beforeend','<p style="color:#ff6b6b;padding:20px">Eroare la pornire: '+String(err.message||err)+'</p>')}
+})();
+</script>
+</body>
+</html>
