@@ -1,5 +1,5 @@
-// Network first (so updates show up), cache as offline fallback.
-const C = 'jarvis-v2';
+﻿// Network first (so updates show up), cache as offline fallback.
+const C = 'jarvis-v3';
 const FILES = ['./', './index.html', './manifest.json', './icon-180.png', './icon-192.png', './icon-512.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(C).then(c => c.addAll(FILES))); self.skipWaiting(); });
 self.addEventListener('activate', e => {
