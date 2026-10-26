@@ -377,12 +377,17 @@ async function ensureModel(){
   else{const v=names.map(x=>{const m=x.match(/^gemini-(\d+(?:\.\d+)?)-flash$/);return m?[x,+m[1]]:null}).filter(Boolean).sort((a,b)=>b[1]-a[1]);if(v.length)pick=v[0][0]}
   S.cfg.model=pick;save('cfg');$('#cModel').value=pick;return pick;
 }
+async function post(url,body){
+  // text/plain avoids the CORS preflight (one less request that can fail on mobile); retry on network drops
+  for(let i=0;;i++){
+    try{return await fetch(url,{method:'POST',headers:{'Content-Type':'text/plain'},body})}
+    catch(e){if(i>=2)throw new Error('Load failed: '+(e.message||e));await new Promise(r=>setTimeout(r,800*(i+1)))}
+  }
+}
 async function gemini(contents){
   const model=await ensureModel();
-  const r=await fetch(API+'models/'+encodeURIComponent(model)+':generateContent?key='+encodeURIComponent(S.cfg.key),{
-    method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({systemInstruction:{parts:[{text:sysPrompt()}]},contents,tools:[{functionDeclarations:DECLS}],generationConfig:{temperature:0.7}})
-  });
+  const r=await post(API+'models/'+encodeURIComponent(model)+':generateContent?key='+encodeURIComponent(S.cfg.key),
+    JSON.stringify({systemInstruction:{parts:[{text:sysPrompt()}]},contents,tools:[{functionDeclarations:DECLS}],generationConfig:{temperature:0.7}}));
   const j=await r.json().catch(()=>({}));
   if(!r.ok){if(r.status===404){S.cfg.model='';save('cfg')}throw new Error((j.error&&j.error.message)||('HTTP '+r.status))}
   return j;
@@ -556,7 +561,7 @@ $('#cTest').onclick=async()=>{
   try{const j=await gemini([{role:'user',parts:[{text:'Salută-mă scurt, într-o propoziție.'}]}]);
     const t=((j.candidates||[])[0]||{}).content;const txt=t&&t.parts?t.parts.filter(p=>p.text&&!p.thought).map(p=>p.text).join(''):'';
     out.textContent='✓ Funcționează ('+S.cfg.model+'): '+txt;speak(txt);
-  }catch(e){out.textContent='✗ '+e.message}
+  }catch(e){out.textContent='✗ '+(/load failed|fetch|network/i.test(e.message)?'Nu ajung la Google. Verifică internetul și dezactivează VPN-ul sau blocantul de reclame, apoi încearcă din nou. ('+e.message+')':e.message)}
 };
 function download(name,data,type){
   const blob=new Blob([data],{type});
