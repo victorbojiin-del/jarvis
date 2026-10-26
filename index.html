@@ -163,7 +163,7 @@ input[type=range]{-webkit-appearance:auto;appearance:auto;padding:0;border:0;bac
         <label>Model<input id="cModel" placeholder="automat"></label>
         <button class="btn" id="cTest">Salvează și testează</button>
         <p class="muted" id="cTestOut"></p>
-        <button class="btn ghost" id="cDiag">Diagnostic conexiune</button>
+        <button class="btn ghost" id="cDiag">Testează viteza și alege modelul</button>
         <p class="muted" id="cDiagOut" style="white-space:pre-wrap;user-select:text;-webkit-user-select:text"></p>
       </div>
       <div class="card"><h3>Voce</h3>
@@ -498,28 +498,33 @@ async function ensureModel(){
   else{const v=names.map(x=>{const m=x.match(/^gemini-(\d+(?:\.\d+)?)-flash$/);return m?[x,+m[1]]:null}).filter(Boolean).sort((a,b)=>b[1]-a[1]);if(v.length)pick=v[0][0]}
   S.cfg.model=pick;save('cfg');$('#cModel').value=pick;return pick;
 }
-async function post(url,body){
-  // text/plain avoids the CORS preflight (one less request that can fail on mobile); retry on network drops
+async function post(url,body,timeoutMs){
+  // retry on network drops (text/plain proved unreliable on iOS, so plain JSON)
   for(let i=0;;i++){
-    try{return await fetch(url,{method:'POST',headers:{'Content-Type':'text/plain'},body})}
-    catch(e){if(i>=2)throw new Error('Load failed: '+(e.message||e));await new Promise(r=>setTimeout(r,800*(i+1)))}
+    const ac=timeoutMs?new AbortController():null,t=ac?setTimeout(()=>ac.abort(),timeoutMs):0;
+    try{return await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body,signal:ac?ac.signal:undefined})}
+    catch(e){if(ac&&ac.signal.aborted)throw new Error('timeout');if(i>=2)throw new Error('Load failed: '+(e.message||e));await new Promise(r=>setTimeout(r,800*(i+1)))}
+    finally{clearTimeout(t)}
   }
 }
-let noThinkCfg=false;
+// least "thinking" each model accepts = fastest replies; the working option is remembered per model
+const THINK=[{thinkingLevel:'minimal'},{thinkingBudget:0},null];
+const thinkIdx=m=>(S.cfg.think||{})[m]||0;
+async function genReq(model,payload,timeoutMs){
+  for(let i=thinkIdx(model);i<THINK.length;i++){
+    const gen=Object.assign({},payload.generationConfig);if(THINK[i])gen.thinkingConfig=THINK[i];
+    const r=await post(API+'models/'+encodeURIComponent(model)+':generateContent?key='+encodeURIComponent(S.cfg.key),JSON.stringify(Object.assign({},payload,{generationConfig:gen})),timeoutMs);
+    const j=await r.json().catch(()=>({}));
+    if(r.ok){if(i!==thinkIdx(model)){S.cfg.think=Object.assign({},S.cfg.think,{[model]:i});save('cfg')}return j}
+    const m=(j.error&&j.error.message)||('HTTP '+r.status);
+    if(r.status===400&&/think/i.test(m)&&i<THINK.length-1)continue;
+    const err=new Error(m);err.status=r.status;throw err;
+  }
+}
 async function gemini(contents){
   const model=await ensureModel();
-  // minimal "thinking" = much faster replies; if this model rejects the setting, retry once without it
-  const gen={temperature:0.7};if(!noThinkCfg)gen.thinkingConfig={thinkingBudget:0};
-  const r=await post(API+'models/'+encodeURIComponent(model)+':generateContent?key='+encodeURIComponent(S.cfg.key),
-    JSON.stringify({systemInstruction:{parts:[{text:sysPrompt()}]},contents,tools:[{functionDeclarations:DECLS}],generationConfig:gen}));
-  const j=await r.json().catch(()=>({}));
-  if(!r.ok){
-    const m=(j.error&&j.error.message)||('HTTP '+r.status);
-    if(r.status===400&&!noThinkCfg&&/think/i.test(m)){noThinkCfg=true;return gemini(contents)}
-    if(r.status===404){S.cfg.model='';save('cfg')}
-    throw new Error(m);
-  }
-  return j;
+  try{return await genReq(model,{systemInstruction:{parts:[{text:sysPrompt()}]},contents,tools:[{functionDeclarations:DECLS}],generationConfig:{temperature:0.7}})}
+  catch(e){if(e.status===404){S.cfg.model='';save('cfg')}throw e}
 }
 async function ask(text){
   wakeStop();
@@ -698,14 +703,24 @@ $('#cDiag').onclick=async()=>{
   const out=$('#cDiagOut'),k=encodeURIComponent(($('#cKey').value||'').trim()),lines=[];
   const log=s=>{lines.push(s);out.textContent=lines.join('\n')};
   const run=async(label,fn)=>{const t0=Date.now();try{const r=await fn();const j=await r.json().catch(()=>({}));log(`${r.ok?'✓':'✗'} ${label}: HTTP ${r.status} (${Date.now()-t0} ms)${r.ok?'':' – '+((j.error&&j.error.message)||'').slice(0,140)}`)}catch(e){log(`✗ ${label}: ${e.name}: ${e.message} (${Date.now()-t0} ms)`)}};
-  log('Versiune: v4 · online: '+navigator.onLine+' · '+(navigator.standalone?'aplicație':'Safari'));
-  const m=S.cfg.model||'gemini-flash-latest',body=JSON.stringify({contents:[{parts:[{text:'Spune doar OK.'}]}]});
-  const gen=API+'models/'+encodeURIComponent(m)+':generateContent?key='+k;
-  await run('1 listă modele (GET)',()=>fetch(API+'models?pageSize=5&key='+k));
-  await run('2 întrebare text/plain',()=>fetch(gen,{method:'POST',headers:{'Content-Type':'text/plain'},body}));
-  await run('3 întrebare JSON',()=>fetch(gen,{method:'POST',headers:{'Content-Type':'application/json'},body}));
-  await run('4 întrebare fără header',()=>fetch(gen,{method:'POST',body}));
-  log('Gata. Fă o captură de ecran și trimite-o.');
+  S.cfg.key=decodeURIComponent(k);save('cfg');
+  log('Versiune: v5 · online: '+navigator.onLine+' · '+(navigator.standalone?'aplicație':'Safari'));
+  let names=[];
+  try{const t0=Date.now(),r=await fetch(API+'models?pageSize=1000&key='+k),j=await r.json();
+    if(!r.ok)throw new Error((j.error&&j.error.message)||r.status);
+    names=(j.models||[]).filter(x=>(x.supportedGenerationMethods||[]).includes('generateContent')).map(x=>x.name.replace(/^models\//,''));
+    log(`✓ conexiune Google: ${Date.now()-t0} ms`);
+  }catch(e){log('✗ conexiune Google: '+e.message);return}
+  const want=['gemini-flash-lite-latest','gemini-flash-latest'],ver=/^gemini-(\d+(?:\.\d+)?)-flash(-lite)?$/;
+  const cand=[...new Set(want.filter(n=>names.includes(n)).concat(names.filter(n=>ver.test(n)).sort((a,b)=>+b.match(ver)[1]-+a.match(ver)[1])))].slice(0,5);
+  log(`Testez viteza la ${cand.length} modele în paralel (max. 40 s)…`);
+  const res=await Promise.all(cand.map(async m=>{const t0=Date.now();
+    try{await genReq(m,{contents:[{parts:[{text:'Spune doar OK.'}]}],generationConfig:{}},40000);return {m,ms:Date.now()-t0}}
+    catch(e){return {m,err:e.message.slice(0,80)}}}));
+  res.sort((a,b)=>(a.ms||1e9)-(b.ms||1e9)).forEach(r=>log(r.ms?`✓ ${r.m}: ${(r.ms/1000).toFixed(1)} s`:`✗ ${r.m}: ${r.err}`));
+  const best=res.find(r=>r.ms);
+  if(best){S.cfg.model=best.m;save('cfg');$('#cModel').value=best.m;log(`→ Am ales cel mai rapid: ${best.m}`)}
+  else log('Niciun model n-a răspuns. Încearcă din nou peste câteva minute.');
 };
 function download(name,data,type){
   const blob=new Blob([data],{type});
