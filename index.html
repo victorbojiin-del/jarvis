@@ -521,10 +521,32 @@ async function genReq(model,payload,timeoutMs){
     const err=new Error(m);err.status=r.status;throw err;
   }
 }
+// free limits are per model: when one is used up, move on to the next one for a while
+let modelCands=null;const cooldown={};
+async function candidates(){
+  if(modelCands)return modelCands;
+  try{
+    const r=await fetch(API+'models?pageSize=1000&key='+encodeURIComponent(S.cfg.key)),j=await r.json();
+    const names=(j.models||[]).filter(x=>(x.supportedGenerationMethods||[]).includes('generateContent')).map(x=>x.name.replace(/^models\//,''));
+    const ver=/^gemini-(\d+(?:\.\d+)?)-flash(-lite)?$/;
+    modelCands=[...new Set(['gemini-flash-latest','gemini-flash-lite-latest'].filter(n=>names.includes(n)).concat(names.filter(n=>ver.test(n)).sort((a,b)=>+b.match(ver)[1]-+a.match(ver)[1])))];
+  }catch(e){modelCands=[]}
+  return modelCands;
+}
 async function gemini(contents){
-  const model=await ensureModel();
-  try{return await genReq(model,{systemInstruction:{parts:[{text:sysPrompt()}]},contents,tools:[{functionDeclarations:DECLS}],generationConfig:{temperature:0.7}})}
-  catch(e){if(e.status===404){S.cfg.model='';save('cfg')}throw e}
+  const first=await ensureModel(),list=[first].concat((await candidates()).filter(m=>m!==first));
+  let last;
+  for(const m of list){
+    if((cooldown[m]||0)>Date.now())continue;
+    try{return await genReq(m,{systemInstruction:{parts:[{text:sysPrompt()}]},contents,tools:[{functionDeclarations:DECLS}],generationConfig:{temperature:0.7}})}
+    catch(e){
+      last=e;
+      if(e.status===429||/quota|exhausted|rate limit/i.test(e.message)){cooldown[m]=Date.now()+60000;continue}
+      if(e.status===404){if(m===first){S.cfg.model='';save('cfg')}continue}
+      throw e;
+    }
+  }
+  throw last||new Error('quota exhausted');
 }
 async function ask(text){
   wakeStop();
@@ -704,7 +726,7 @@ $('#cDiag').onclick=async()=>{
   const log=s=>{lines.push(s);out.textContent=lines.join('\n')};
   const run=async(label,fn)=>{const t0=Date.now();try{const r=await fn();const j=await r.json().catch(()=>({}));log(`${r.ok?'✓':'✗'} ${label}: HTTP ${r.status} (${Date.now()-t0} ms)${r.ok?'':' – '+((j.error&&j.error.message)||'').slice(0,140)}`)}catch(e){log(`✗ ${label}: ${e.name}: ${e.message} (${Date.now()-t0} ms)`)}};
   S.cfg.key=decodeURIComponent(k);save('cfg');
-  log('Versiune: v5 · online: '+navigator.onLine+' · '+(navigator.standalone?'aplicație':'Safari'));
+  log('Versiune: v6 · online: '+navigator.onLine+' · '+(navigator.standalone?'aplicație':'Safari'));
   let names=[];
   try{const t0=Date.now(),r=await fetch(API+'models?pageSize=1000&key='+k),j=await r.json();
     if(!r.ok)throw new Error((j.error&&j.error.message)||r.status);
