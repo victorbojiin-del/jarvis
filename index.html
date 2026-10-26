@@ -51,6 +51,10 @@ nav button.on{color:var(--accent)}
 @keyframes spin{to{transform:rotate(360deg)}}
 @keyframes talk{from{transform:scale(.96)}to{transform:scale(1.07)}}
 .hint{font-size:12px;color:var(--muted);margin-top:4px;min-height:16px}
+.wakebtn{margin-top:6px;background:none;border:1px solid var(--ring);color:var(--muted);border-radius:999px;padding:5px 14px;font-size:12px}
+.wakebtn.on{border-color:var(--accent);color:var(--accent);box-shadow:0 0 12px rgba(54,214,255,.35)}
+.wake .orb .r1{border-color:rgba(54,214,255,.7);animation:breathe 2.4s ease-in-out infinite}
+@keyframes breathe{50%{transform:scale(1.08);opacity:.5}}
 .inrow{display:flex;gap:8px;padding:8px 12px 10px}
 .inrow input{flex:1}
 input,select{width:100%;font-size:16px;color:var(--text);background:var(--panel);border:1px solid var(--ring);border-radius:12px;padding:10px 12px;outline:none;-webkit-appearance:none;appearance:none}
@@ -109,6 +113,7 @@ input[type=range]{-webkit-appearance:auto;appearance:auto;padding:0;border:0;bac
       <div class="orb-wrap">
         <button class="orb" id="orb" aria-label="Vorbește"><span class="ring r2"></span><span class="ring r1"></span><span class="core"></span></button>
         <div class="hint" id="hint">Atinge ca să vorbești</div>
+        <button class="wakebtn" id="wakeBtn">Mereu activ: oprit</button>
       </div>
       <form class="inrow" id="inForm">
         <input id="txt" placeholder="Scrie sau dictează…" autocomplete="off" enterkeyhint="send">
@@ -158,6 +163,8 @@ input[type=range]{-webkit-appearance:auto;appearance:auto;padding:0;border:0;bac
         <label>Model<input id="cModel" placeholder="automat"></label>
         <button class="btn" id="cTest">Salvează și testează</button>
         <p class="muted" id="cTestOut"></p>
+        <button class="btn ghost" id="cDiag">Diagnostic conexiune</button>
+        <p class="muted" id="cDiagOut" style="white-space:pre-wrap;user-select:text;-webkit-user-select:text"></p>
       </div>
       <div class="card"><h3>Voce</h3>
         <label class="row">Răspunde cu voce<input type="checkbox" id="cSpeak"></label>
@@ -243,7 +250,8 @@ document.querySelectorAll('nav button').forEach(b=>b.addEventListener('click',()
 const STATUS={idle:'Pregătit',listening:'Ascult…',thinking:'Mă gândesc…',speaking:'Vorbesc…'};
 const HINT={idle:'Atinge ca să vorbești',listening:'Atinge ca să oprești',thinking:'',speaking:'Atinge ca să mă întrerupi'};
 let state='idle';
-function setState(s){state=s;const c=$('#v-chat');c.classList.remove('listening','thinking','speaking');if(s!=='idle')c.classList.add(s);$('#status').textContent=STATUS[s];$('#hint').textContent=HINT[s]}
+function setState(s){state=s;const c=$('#v-chat');c.classList.remove('listening','thinking','speaking');if(s!=='idle')c.classList.add(s);$('#status').textContent=STATUS[s];$('#hint').textContent=(s==='idle'&&wake.on)?'Spune „Jarvis, …”':HINT[s]}
+let wake={on:false,rec:null,timer:null,pendingUntil:0,lock:null};
 
 /* ---------- chat log ---------- */
 function fmt(t){return esc(t).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/(^|\n)\s*[*-] /g,'$1• ')}
@@ -274,7 +282,11 @@ function unlockTTS(){
 function cleanSpeech(t){return t.replace(/[*#_`>~]/g,'').replace(/https?:\/\/\S+/g,'').replace(/\bRON\b/g,'lei').replace(/\s+/g,' ').trim()}
 let speakId=0,ttsBlockedUntil=0;
 function stopSpeaking(){speakId++;try{speechSynthesis.cancel()}catch(e){}try{player.pause()}catch(e){}}
-function afterSpeak(force){if(state==='speaking'||state==='thinking')setState('idle');if(S.cfg.continuous&&!force)setTimeout(()=>{try{if(state==='idle')listen()}catch(e){}},350)}
+function afterSpeak(force){
+  if(state==='speaking'||state==='thinking')setState('idle');
+  if(wake.on)setTimeout(()=>{if(state==='idle')wakeStart()},350);
+  else if(S.cfg.continuous&&!force)setTimeout(()=>{try{if(state==='idle')listen()}catch(e){}},350);
+}
 function systemSpeak(text,force){
   if(!window.speechSynthesis){afterSpeak(force);return}
   try{
@@ -287,7 +299,7 @@ function systemSpeak(text,force){
   }catch(e){afterSpeak(force)}
 }
 async function speak(text,force){
-  if((!S.cfg.speak&&!force)||!text)return;
+  if((!S.cfg.speak&&!force)||!text){afterSpeak(force);return}
   stopSpeaking();const my=speakId,clean=cleanSpeech(text);
   if(S.cfg.engine==='ai'&&S.cfg.key&&Date.now()>ttsBlockedUntil){
     setState('thinking');
@@ -349,6 +361,7 @@ function listen(){
   try{if(navigator.audioSession)navigator.audioSession.type='auto'}catch(e){}
   if(state==='listening'){try{rec.stop()}catch(e){}return}
   if(!SR){toast('Recunoașterea vocală nu e disponibilă aici. Folosește microfonul de pe tastatură.');$('#txt').focus();return}
+  if(wake.rec){wakeStop();setTimeout(listen,300);return}
   rec=new SR();rec.lang='ro-RO';rec.interimResults=true;rec.continuous=false;rec.maxAlternatives=1;
   let fin='';
   rec.onresult=e=>{let inter='';for(let i=e.resultIndex;i<e.results.length;i++){const r=e.results[i];if(r.isFinal)fin+=r[0].transcript;else inter+=r[0].transcript}$('#txt').value=(fin+inter).trim()};
@@ -356,9 +369,46 @@ function listen(){
     if(e.error==='not-allowed'||e.error==='service-not-allowed')toast('Permite accesul la microfon și la Recunoașterea vocală (Setări iPhone → Safari / Siri).');
     else if(e.error!=='no-speech'&&e.error!=='aborted')toast('Eroare microfon: '+e.error);
   };
-  rec.onend=()=>{if(state==='listening')setState('idle');const t=$('#txt').value.trim();if(t){$('#txt').value='';ask(t)}};
+  rec.onend=()=>{if(state==='listening')setState('idle');const t=$('#txt').value.trim();if(t){$('#txt').value='';ask(t)}else if(wake.on)setTimeout(wakeStart,300)};
   try{rec.start();setState('listening')}catch(e){toast('Nu pot porni microfonul: '+e.message)}
 }
+
+/* ---------- always-on mode: listens for "Jarvis" while the app is open ---------- */
+const WAKE=/\b(jarvis|jarvi|jarviz|jarwis|jervis|giarvis|djarvis|garvis|jarves)\b/i;
+function wakeStart(){
+  if(!wake.on||wake.rec||state!=='idle'||document.hidden||!SR)return;
+  try{if(navigator.audioSession)navigator.audioSession.type='auto'}catch(e){}
+  const r=new SR();r.lang='ro-RO';r.continuous=true;r.interimResults=true;r.maxAlternatives=1;
+  r.onresult=e=>{let all='';for(let i=0;i<e.results.length;i++)all+=e.results[i][0].transcript+' ';wakeHeard(all.trim(),e.results[e.results.length-1].isFinal)};
+  r.onerror=e=>{if(e.error==='not-allowed'||e.error==='service-not-allowed'){wakeSet(false);toast('Permite accesul la microfon pentru modul Mereu activ.')}};
+  r.onend=()=>{if(wake.rec===r)wake.rec=null;if(wake.on&&state==='idle')setTimeout(wakeStart,250)};
+  try{r.start();wake.rec=r;$('#v-chat').classList.add('wake')}catch(e){wake.rec=null}
+}
+function wakeStop(){clearTimeout(wake.timer);const r=wake.rec;wake.rec=null;$('#v-chat').classList.remove('wake');if(r)try{r.abort()}catch(e){}}
+function wakeHeard(all,isFinal){
+  const m=all.match(WAKE);let cmd;
+  if(m)cmd=all.slice(m.index+m[0].length).replace(/^[\s,.!?:;-]+/,'');
+  else if(Date.now()<wake.pendingUntil)cmd=all;
+  else{if(all.length>300){wakeStop();setTimeout(wakeStart,250)}return}  // no wake word: ignore, clear long buffers
+  $('#txt').value=cmd;
+  clearTimeout(wake.timer);
+  wake.timer=setTimeout(()=>wakeFire(cmd),cmd?(isFinal?500:1500):1800);
+}
+function wakeFire(cmd){
+  const t=(cmd||'').trim();wakeStop();$('#txt').value='';
+  if(t){wake.pendingUntil=0;ask(t)}
+  else{wake.pendingUntil=Date.now()+9000;systemSpeak('Da?',false)}  // just "Jarvis" → answer and wait for the command
+}
+async function keepAwake(){try{if(wake.on&&navigator.wakeLock&&!wake.lock){wake.lock=await navigator.wakeLock.request('screen');wake.lock.addEventListener('release',()=>{wake.lock=null})}}catch(e){}}
+function wakeSet(on){
+  wake.on=on;S.cfg.alwaysOn=on;save('cfg');
+  const b=$('#wakeBtn');b.classList.toggle('on',on);b.textContent='Mereu activ: '+(on?'pornit':'oprit');
+  if(on){keepAwake();wakeStart();toast('Ascult mereu cât e aplicația deschisă. Spune „Jarvis, …”.')}
+  else{wakeStop();if(wake.lock){wake.lock.release().catch(()=>{});wake.lock=null}}
+  setState(state);
+}
+$('#wakeBtn').addEventListener('click',()=>{unlockTTS();if(!SR){toast('Recunoașterea vocală nu e disponibilă aici.');return}wakeSet(!wake.on)});
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&wake.on){keepAwake();setTimeout(wakeStart,400)}});
 $('#orb').addEventListener('click',listen);
 $('#inForm').addEventListener('submit',e=>{e.preventDefault();unlockTTS();const t=$('#txt').value.trim();if(!t||state==='thinking')return;$('#txt').value='';$('#txt').blur();ask(t)});
 
@@ -472,6 +522,7 @@ async function gemini(contents){
   return j;
 }
 async function ask(text){
+  wakeStop();
   addMsg('user',text);
   if(!S.cfg.key){const m='Ca să pot gândi am nevoie de o cheie Gemini gratuită. Deschide Setări și lipește-o acolo.';addMsg('bot',m);speak(m);return}
   S.hist.push({role:'user',parts:[{text}]});
@@ -643,6 +694,19 @@ $('#cTest').onclick=async()=>{
     out.textContent='✓ Funcționează ('+S.cfg.model+'): '+txt;speak(txt);
   }catch(e){out.textContent='✗ '+(/load failed|fetch|network/i.test(e.message)?'Nu ajung la Google. Verifică internetul și dezactivează VPN-ul sau blocantul de reclame, apoi încearcă din nou. ('+e.message+')':e.message)}
 };
+$('#cDiag').onclick=async()=>{
+  const out=$('#cDiagOut'),k=encodeURIComponent(($('#cKey').value||'').trim()),lines=[];
+  const log=s=>{lines.push(s);out.textContent=lines.join('\n')};
+  const run=async(label,fn)=>{const t0=Date.now();try{const r=await fn();const j=await r.json().catch(()=>({}));log(`${r.ok?'✓':'✗'} ${label}: HTTP ${r.status} (${Date.now()-t0} ms)${r.ok?'':' – '+((j.error&&j.error.message)||'').slice(0,140)}`)}catch(e){log(`✗ ${label}: ${e.name}: ${e.message} (${Date.now()-t0} ms)`)}};
+  log('Versiune: v4 · online: '+navigator.onLine+' · '+(navigator.standalone?'aplicație':'Safari'));
+  const m=S.cfg.model||'gemini-flash-latest',body=JSON.stringify({contents:[{parts:[{text:'Spune doar OK.'}]}]});
+  const gen=API+'models/'+encodeURIComponent(m)+':generateContent?key='+k;
+  await run('1 listă modele (GET)',()=>fetch(API+'models?pageSize=5&key='+k));
+  await run('2 întrebare text/plain',()=>fetch(gen,{method:'POST',headers:{'Content-Type':'text/plain'},body}));
+  await run('3 întrebare JSON',()=>fetch(gen,{method:'POST',headers:{'Content-Type':'application/json'},body}));
+  await run('4 întrebare fără header',()=>fetch(gen,{method:'POST',body}));
+  log('Gata. Fă o captură de ecran și trimite-o.');
+};
 function download(name,data,type){
   const blob=new Blob([data],{type});
   try{const file=new File([blob],name,{type});if(navigator.canShare&&navigator.canShare({files:[file]})){navigator.share({files:[file]}).catch(()=>{});return}}catch(e){}
@@ -659,7 +723,8 @@ const h=new Date().getHours(),greet=h<11?'Bună dimineața':h<18?'Bună ziua':'B
 if(!S.cfg.key)addMsg('bot',greet+(S.cfg.name?', '+S.cfg.name:'')+'! Sunt Jarvis. Ca să pot gândi, am nevoie de o cheie Gemini gratuită: deschide Setări (jos în dreapta).');
 else if(!S.hist.length)addMsg('bot',greet+(S.cfg.name?', '+S.cfg.name:'')+'. Cu ce te pot ajuta?');
 renderFin();renderNotes();checkReminders();setInterval(checkReminders,20000);
-if(!SR)$('#hint').textContent='Folosește microfonul de pe tastatură';
+if(!SR){$('#hint').textContent='Folosește microfonul de pe tastatură';$('#wakeBtn').style.display='none'}
+else if(S.cfg.alwaysOn)wakeSet(true);
 if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
 }catch(err){document.body.insertAdjacentHTML('beforeend','<p style="color:#ff6b6b;padding:20px">Eroare la pornire: '+String(err.message||err)+'</p>')}
 })();
