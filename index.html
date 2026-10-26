@@ -162,7 +162,15 @@ input[type=range]{-webkit-appearance:auto;appearance:auto;padding:0;border:0;bac
       <div class="card"><h3>Voce</h3>
         <label class="row">Răspunde cu voce<input type="checkbox" id="cSpeak"></label>
         <label class="row">Conversație continuă<input type="checkbox" id="cCont"></label>
-        <label>Voce<select id="cVoice"></select></label>
+        <label>Tip voce<select id="cEngine"><option value="ai">Google AI — realistă</option><option value="ios">iPhone — instant</option></select></label>
+        <label>Voce AI<select id="cAiVoice">
+          <option value="Charon">Charon — masculină, calmă</option><option value="Orus">Orus — masculină, fermă</option>
+          <option value="Iapetus">Iapetus — masculină, clară</option><option value="Fenrir">Fenrir — masculină, energică</option>
+          <option value="Algenib">Algenib — masculină, gravă</option><option value="Kore">Kore — feminină, fermă</option>
+          <option value="Aoede">Aoede — feminină, relaxată</option><option value="Leda">Leda — feminină, tânără</option>
+        </select></label>
+        <label>Voce iPhone (rezervă)<select id="cVoice"></select></label>
+        <p class="muted">Vocea AI are o limită gratuită (~3 răspunsuri/minut); peste ea, Jarvis folosește automat vocea iPhone. Pentru o voce iPhone mai bună: Configurări → Accesibilitate → Conținut vorbit → Voci → Română → descarcă „Ioana (îmbunătățită)”.</p>
         <label>Viteză: <span id="cRateV"></span><input type="range" id="cRate" min="0.7" max="1.4" step="0.05"></label>
         <button class="btn ghost" id="cVoiceTest">Ascultă vocea</button>
       </div>
@@ -203,7 +211,7 @@ const store={
 const S={
   tx:store.get('tx',[]), notes:store.get('notes',[]), rem:store.get('rem',[]),
   budgets:store.get('budgets',{}), facts:store.get('facts',[]), hist:store.get('hist',[]),
-  cfg:Object.assign({key:'',model:'',voice:'',rate:1,speak:true,continuous:false,name:'Bojin',currency:'RON'},store.get('cfg',{}))
+  cfg:Object.assign({key:'',model:'',voice:'',rate:1,speak:true,continuous:false,name:'Bojin',currency:'RON',engine:'ai',aiVoice:'Charon',ttsModel:''},store.get('cfg',{}))
 };
 const save=k=>store.set(k,S[k]);
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
@@ -255,18 +263,80 @@ function loadVoices(){
 }
 if(window.speechSynthesis){loadVoices();speechSynthesis.onvoiceschanged=loadVoices}
 function pickVoice(){return voices.find(v=>v.voiceURI===S.cfg.voice)||voices.find(v=>/^ro/i.test(v.lang))||null}
-function unlockTTS(){if(ttsUnlocked||!window.speechSynthesis)return;ttsUnlocked=true;try{const u=new SpeechSynthesisUtterance(' ');u.volume=0;speechSynthesis.speak(u)}catch(e){}}
+// one reusable <audio> element: unlocked on the first tap, so iOS lets it play later (and it ignores the silent switch, unlike WebAudio)
+const player=new Audio();player.playsInline=true;
+const SILENT='data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=';
+function unlockTTS(){
+  if(ttsUnlocked)return;ttsUnlocked=true;
+  try{player.src=SILENT;player.play().catch(()=>{})}catch(e){}
+  try{if(window.speechSynthesis){const u=new SpeechSynthesisUtterance(' ');u.volume=0;speechSynthesis.speak(u)}}catch(e){}
+}
 function cleanSpeech(t){return t.replace(/[*#_`>~]/g,'').replace(/https?:\/\/\S+/g,'').replace(/\bRON\b/g,'lei').replace(/\s+/g,' ').trim()}
-function speak(text,force){
-  if((!S.cfg.speak&&!force)||!window.speechSynthesis||!text)return;
+let speakId=0,ttsBlockedUntil=0;
+function stopSpeaking(){speakId++;try{speechSynthesis.cancel()}catch(e){}try{player.pause()}catch(e){}}
+function afterSpeak(force){if(state==='speaking'||state==='thinking')setState('idle');if(S.cfg.continuous&&!force)setTimeout(()=>{try{if(state==='idle')listen()}catch(e){}},350)}
+function systemSpeak(text,force){
+  if(!window.speechSynthesis){afterSpeak(force);return}
   try{
     speechSynthesis.cancel();
-    const u=new SpeechSynthesisUtterance(cleanSpeech(text));
+    const u=new SpeechSynthesisUtterance(text);
     u.lang='ro-RO';const v=pickVoice();if(v)u.voice=v;u.rate=+S.cfg.rate||1;
     u.onstart=()=>setState('speaking');
-    u.onend=u.onerror=()=>{if(state==='speaking')setState('idle');if(S.cfg.continuous&&!force)setTimeout(()=>{try{if(state==='idle')listen()}catch(e){}},350)};
+    u.onend=u.onerror=()=>afterSpeak(force);
     speechSynthesis.speak(u);
+  }catch(e){afterSpeak(force)}
+}
+async function speak(text,force){
+  if((!S.cfg.speak&&!force)||!text)return;
+  stopSpeaking();const my=speakId,clean=cleanSpeech(text);
+  if(S.cfg.engine==='ai'&&S.cfg.key&&Date.now()>ttsBlockedUntil){
+    setState('thinking');
+    try{const url=await aiTTS(clean);if(my!==speakId)return;await playUrl(url,force);return}
+    catch(e){if(my!==speakId)return;if(/429|quota|exhaust|rate/i.test(e.message))ttsBlockedUntil=Date.now()+60000;console.warn('AI TTS:',e.message)}
+  }
+  systemSpeak(clean,force);
+}
+function playUrl(url,force){
+  return new Promise((res,rej)=>{
+    try{if(navigator.audioSession)navigator.audioSession.type='playback'}catch(e){}
+    player.onplaying=()=>setState('speaking');
+    player.onended=()=>{URL.revokeObjectURL(url);afterSpeak(force);res()};
+    player.onerror=()=>rej(new Error('audio'));
+    player.src=url;player.playbackRate=+S.cfg.rate||1;
+    player.play().catch(rej);
+  });
+}
+async function ttsModel(){
+  if(S.cfg.ttsModel)return S.cfg.ttsModel;
+  let pick='gemini-2.5-flash-preview-tts';
+  try{
+    const r=await fetch(API+'models?pageSize=1000&key='+encodeURIComponent(S.cfg.key)),j=await r.json();
+    const score=n=>{const m=n.match(/gemini-(\d+(?:\.\d+)?)/);return (m?+m[1]:0)-(/preview/.test(n)?0.01:0)};
+    const c=(j.models||[]).map(m=>m.name.replace(/^models\//,'')).filter(n=>/tts/.test(n)&&/flash/.test(n)&&!/lite/.test(n)).sort((a,b)=>score(b)-score(a));
+    if(c.length)pick=c[0];
   }catch(e){}
+  S.cfg.ttsModel=pick;save('cfg');return pick;
+}
+function b64ToBytes(b){const s=atob(b),u=new Uint8Array(s.length);for(let i=0;i<s.length;i++)u[i]=s.charCodeAt(i);return u}
+function pcmToWav(pcm,rate){
+  const h=new DataView(new ArrayBuffer(44)),w=(o,s)=>{for(let i=0;i<s.length;i++)h.setUint8(o+i,s.charCodeAt(i))};
+  w(0,'RIFF');h.setUint32(4,36+pcm.length,true);w(8,'WAVE');w(12,'fmt ');h.setUint32(16,16,true);h.setUint16(20,1,true);h.setUint16(22,1,true);
+  h.setUint32(24,rate,true);h.setUint32(28,rate*2,true);h.setUint16(32,2,true);h.setUint16(34,16,true);w(36,'data');h.setUint32(40,pcm.length,true);
+  return new Blob([h.buffer,pcm],{type:'audio/wav'});
+}
+async function aiTTS(text){
+  const model=await ttsModel();
+  const r=await post(API+'models/'+encodeURIComponent(model)+':generateContent?key='+encodeURIComponent(S.cfg.key),JSON.stringify({
+    contents:[{parts:[{text:'Citește natural, fluent și cald, în limba română, ca un majordom elegant și calm: '+text}]}],
+    generationConfig:{responseModalities:['AUDIO'],speechConfig:{voiceConfig:{prebuiltVoiceConfig:{voiceName:S.cfg.aiVoice||'Charon'}}}}
+  }));
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok){if(r.status===404){S.cfg.ttsModel='';save('cfg')}throw new Error((j.error&&j.error.message)||('HTTP '+r.status))}
+  const parts=(((j.candidates||[])[0]||{}).content||{}).parts||[],a=parts.find(p=>p.inlineData&&p.inlineData.data);
+  if(!a)throw new Error('fără audio');
+  const mime=a.inlineData.mimeType||'',bytes=b64ToBytes(a.inlineData.data);
+  if(/wav|mpeg|mp3|ogg|aac|mp4/.test(mime))return URL.createObjectURL(new Blob([bytes],{type:mime}));
+  return URL.createObjectURL(pcmToWav(bytes,+((mime.match(/rate=(\d+)/)||[])[1])||24000));
 }
 
 /* ---------- voice in ---------- */
@@ -274,8 +344,9 @@ const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
 let rec=null;
 function listen(){
   unlockTTS();
-  if(state==='speaking'){speechSynthesis.cancel();setState('idle');return}
+  if(state==='speaking'){stopSpeaking();setState('idle');return}
   if(state==='thinking')return;
+  try{if(navigator.audioSession)navigator.audioSession.type='auto'}catch(e){}
   if(state==='listening'){try{rec.stop()}catch(e){}return}
   if(!SR){toast('Recunoașterea vocală nu e disponibilă aici. Folosește microfonul de pe tastatură.');$('#txt').focus();return}
   rec=new SR();rec.lang='ro-RO';rec.interimResults=true;rec.continuous=false;rec.maxAlternatives=1;
@@ -384,12 +455,20 @@ async function post(url,body){
     catch(e){if(i>=2)throw new Error('Load failed: '+(e.message||e));await new Promise(r=>setTimeout(r,800*(i+1)))}
   }
 }
+let noThinkCfg=false;
 async function gemini(contents){
   const model=await ensureModel();
+  // minimal "thinking" = much faster replies; if this model rejects the setting, retry once without it
+  const gen={temperature:0.7};if(!noThinkCfg)gen.thinkingConfig={thinkingBudget:0};
   const r=await post(API+'models/'+encodeURIComponent(model)+':generateContent?key='+encodeURIComponent(S.cfg.key),
-    JSON.stringify({systemInstruction:{parts:[{text:sysPrompt()}]},contents,tools:[{functionDeclarations:DECLS}],generationConfig:{temperature:0.7}}));
+    JSON.stringify({systemInstruction:{parts:[{text:sysPrompt()}]},contents,tools:[{functionDeclarations:DECLS}],generationConfig:gen}));
   const j=await r.json().catch(()=>({}));
-  if(!r.ok){if(r.status===404){S.cfg.model='';save('cfg')}throw new Error((j.error&&j.error.message)||('HTTP '+r.status))}
+  if(!r.ok){
+    const m=(j.error&&j.error.message)||('HTTP '+r.status);
+    if(r.status===400&&!noThinkCfg&&/think/i.test(m)){noThinkCfg=true;return gemini(contents)}
+    if(r.status===404){S.cfg.model='';save('cfg')}
+    throw new Error(m);
+  }
   return j;
 }
 async function ask(text){
@@ -551,7 +630,8 @@ $('#cKey').value=S.cfg.key;$('#cModel').value=S.cfg.model;$('#cSpeak').checked=S
 $('#cRate').value=S.cfg.rate;$('#cRateV').textContent=(+S.cfg.rate).toFixed(2)+'×';$('#cName').value=S.cfg.name;$('#cCur').value=S.cfg.currency;
 const bind=(id,key,fn)=>$(id).addEventListener('change',e=>{S.cfg[key]=fn(e.target);save('cfg')});
 bind('#cKey','key',t=>t.value.trim());bind('#cModel','model',t=>t.value.trim());bind('#cSpeak','speak',t=>t.checked);bind('#cCont','continuous',t=>t.checked);
-bind('#cVoice','voice',t=>t.value);bind('#cName','name',t=>t.value.trim());bind('#cCur','currency',t=>t.value.trim().toUpperCase()||'RON');
+bind('#cVoice','voice',t=>t.value);bind('#cEngine','engine',t=>t.value);bind('#cAiVoice','aiVoice',t=>t.value);
+$('#cEngine').value=S.cfg.engine;$('#cAiVoice').value=S.cfg.aiVoice;bind('#cName','name',t=>t.value.trim());bind('#cCur','currency',t=>t.value.trim().toUpperCase()||'RON');
 $('#cRate').addEventListener('input',e=>{S.cfg.rate=+e.target.value;$('#cRateV').textContent=S.cfg.rate.toFixed(2)+'×';save('cfg')});
 $('#cVoiceTest').onclick=()=>{unlockTTS();speak('Bună, '+(S.cfg.name||'')+'. Sunt Jarvis, la dispoziția ta.',true)};
 $('#cTest').onclick=async()=>{
